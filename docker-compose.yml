@@ -1,0 +1,41 @@
+# Local/production-like stack: Postgres + the orbit API.
+# The api waits for Postgres to be healthy, applies migrations, then serves.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: orbit
+      POSTGRES_DB: orbit
+    ports:
+      - "5432:5432"
+    volumes:
+      - orbit_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # asyncpg URL points at the compose service name `db`.
+      ORBIT_DATABASE_URL: postgresql+asyncpg://orbit:orbit@db:5432/orbit
+      ORBIT_JWT_SECRET: change-me-in-production
+      ORBIT_RATE_LIMIT: 100/minute
+      ORBIT_AUTH_RATE_LIMIT: 10/minute
+    ports:
+      - "8000:8000"
+    # Run migrations to head, then start uvicorn.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn orbit.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  orbit_pgdata:
